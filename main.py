@@ -16,7 +16,6 @@ if not tf.test.gpu_device_name():
 else:
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
 
-
 def load_vgg(sess, vgg_path):
     """
     Load Pretrained VGG Model into TensorFlow.
@@ -32,8 +31,19 @@ def load_vgg(sess, vgg_path):
     vgg_layer3_out_tensor_name = 'layer3_out:0'
     vgg_layer4_out_tensor_name = 'layer4_out:0'
     vgg_layer7_out_tensor_name = 'layer7_out:0'
-    
-    return None, None, None, None, None
+
+    # Returns the default graph for the current thread
+    vgg_graph = tf.get_default_graph()
+    # Loads the model specified by the tag
+    tf.saved_model.loader.load(sess, [vgg_tag], vgg_path)
+    # Gets tensors in the graph by their name
+    image_input = vgg_graph.get_tensor_by_name(vgg_input_tensor_name)
+    keep_prob = vgg_graph.get_tensor_by_name(vgg_keep_prob_tensor_name)
+    layer3_out = vgg_graph.get_tensor_by_name(vgg_layer3_out_tensor_name)
+    layer4_out = vgg_graph.get_tensor_by_name(vgg_layer4_out_tensor_name)
+    layer7_out = vgg_graph.get_tensor_by_name(vgg_layer7_out_tensor_name)
+
+    return image_input, keep_prob, layer3_out, layer4_out, layer7_out
 tests.test_load_vgg(load_vgg, tf)
 
 
@@ -47,7 +57,38 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    return None
+    # Decoder architecture (FCN-8s) based on paper "Fully Convolutional Networks for Semantic Segmentation"
+    # Code here: https://github.com/shelhamer/fcn.berkeleyvision.org/blob/master/voc-fcn8s-atonce/net.py
+    # Here is a good diagram http://ethereon.github.io/netscope/#/preset/fcn-8s-pascal
+
+    # We must add 1x1 convolutions on top of the VGG to reduce the number of filters from 4096
+    # to the number of classes for our specific model.
+    layer7_1x1 = tf.layers.conv2d(inputs=vgg_layer7_out, filters=num_classes, kernel_size=1,
+                                padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    # To understand the relationship between upsampling and strides
+    # Check https://distill.pub/2016/deconv-checkerboard/
+    # https://www.youtube.com/watch?v=ByjaPdWXKJ4&feature=youtu.be&t=16m59s
+    # https://datascience.stackexchange.com/questions/6107/what-are-deconvolutional-layers/6154#6154
+
+    layer7_upsample = tf.layers.conv2d_transpose(inputs=layer7_1x1, filters=num_classes, kernel_size=4, strides=(2, 2),
+                                        padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    # Scale layer4 skip for compatibility
+    layer4_scale = tf.multiply(vgg_layer4_out, 0.01)
+    layer4_1x1 = tf.layers.conv2d(inputs=layer4_scale, filters=num_classes, kernel_size=1,
+                                   padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    layer4_skip = tf.add(layer7_upsample, layer4_1x1)
+    layer4_upsample = tf.layers.conv2d_transpose(inputs=layer4_skip, filters=num_classes, kernel_size=4, strides=(2, 2),
+                                        padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+
+    # Scale layer3 skip for compatibility
+    layer3_scale = tf.multiply(vgg_layer3_out, 0.0001)
+    layer3_1x1 = tf.layers.conv2d(inputs=layer3_scale, filters=num_classes, kernel_size=1,
+                                   padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    layer3_skip = tf.add(layer4_upsample, layer3_1x1)
+
+    last_layer = tf.layers.conv2d_transpose(inputs=layer3_skip, filters=num_classes, kernel_size=16, strides=(8, 8),
+                                       padding='same', kernel_regularizer=tf.contrib.layers.l2_regularizer(1e-3))
+    return last_layer
 tests.test_layers(layers)
 
 
@@ -61,7 +102,16 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
     # TODO: Implement function
-    return None, None, None
+    # No need to reshape. Doing it to prevent failing tests
+    logits = tf.reshape(nn_last_layer, (-1, num_classes))
+    labels = tf.reshape(correct_label, (-1, num_classes))
+    cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels))
+    # Adds regularization losses
+    reg_losses = tf.get_collection(tf.GraphKeys.REGULARIZATION_LOSSES)
+    loss = cross_entropy_loss + sum(reg_losses)
+    optimizer = tf.train.AdamOptimizer(learning_rate)
+    train_op = optimizer.minimize(loss)
+    return logits, train_op, loss
 tests.test_optimize(optimize)
 
 
@@ -81,12 +131,21 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     :param learning_rate: TF Placeholder for learning rate
     """
     # TODO: Implement function
-    pass
+    sess.run(tf.global_variables_initializer())
+
+    print ("---- Training -----\n")
+    for i in range(epochs):
+        print("EPOCH {} ...".format(i+1))
+        for image, label in get_batches_fn(batch_size):
+            feed_dict = {input_image: image, correct_label: label, keep_prob: 0.85, learning_rate: 1e-4}
+            _, loss = sess.run([train_op, cross_entropy_loss], feed_dict=feed_dict)
+            print("Loss: = {:.3f}".format(loss))
+        print()
 tests.test_train_nn(train_nn)
 
 
 def run():
-    num_classes = 2
+    num_classes = 2 # Binary classification, "road" or "non-road" pixels
     image_shape = (160, 576)
     data_dir = './data'
     runs_dir = './runs'
@@ -98,7 +157,7 @@ def run():
     # OPTIONAL: Train and Inference on the cityscapes dataset instead of the Kitti dataset.
     # You'll need a GPU with at least 10 teraFLOPS to train on.
     #  https://www.cityscapes-dataset.com/
-
+    tf.reset_default_graph()
     with tf.Session() as sess:
         # Path to vgg model
         vgg_path = os.path.join(data_dir, 'vgg')
@@ -109,11 +168,23 @@ def run():
         #  https://datascience.stackexchange.com/questions/5224/how-to-prepare-augment-images-for-neural-network
 
         # TODO: Build NN using load_vgg, layers, and optimize function
+        epochs = 9
+        batch_size = 5
+
+        # Placeholders
+        correct_label = tf.placeholder(tf.int32, [None, None, None, num_classes], name='correct_label')
+        learning_rate = tf.placeholder(tf.float32, name='learning_rate')
+
+        input_image, keep_prob, vgg_layer3_out, vgg_layer4_out, vgg_layer7_out = load_vgg(sess, vgg_path)
+        nn_last_layer = layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes)
+        logits, train_op, cross_entropy_loss = optimize(nn_last_layer, correct_label, learning_rate, num_classes)
 
         # TODO: Train NN using the train_nn function
+        train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
+             correct_label, keep_prob, learning_rate)
 
         # TODO: Save inference data using helper.save_inference_samples
-        #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
+        helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
 
         # OPTIONAL: Apply the trained model to a video
 
