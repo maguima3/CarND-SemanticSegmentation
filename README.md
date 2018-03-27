@@ -1,6 +1,93 @@
 # Semantic Segmentation
+
 ### Introduction
-In this project, you'll label the pixels of a road in images using a Fully Convolutional Network (FCN).
+The goeal of this project is to label the pixels of a road in images using a Fully Convolutional Network (FCN).
+This meas that each pixel is going to be classified as "road" or as "not road".
+
+The paper "Fully Convolutional Networks for Semantic Segmentation" from UC Berkeley explains the methodology and architecture I followed in this project in detail.
+The code can be found [here](https://github.com/shelhamer/fcn.berkeleyvision.org/blob/master/voc-fcn8s-atonce/net.py).
+
+The FCN can be divided in two parts: the **encoder** and the **decoder**.
+* Encoder.
+The encoder extracts features from the images, which will be used by the decoder.
+As suggested in the paper and in the lessons, I have used a VGG16 model pre-trained on ImageNet.
+To perserve the spatial information, the fully-connented layers of the VGG16 model have been replaced
+with convolutions.
+* Decoder.
+Using transposed convolutional and skip layers, the decoder helps mapping
+low resolution feature maps at the output of the encoder to full input image size feature maps.
+
+### Final outcome
+The FCN was trained with the following parameters:
+* Epochs: 90
+* Batch size: 10
+* Learning rate: 1e-4
+* Keep probability: 0.5
+
+During training, I have checked that the loss of the model decreased over time. The final average loss was
+````
+EPOCH 90 ...
+Loss: = 0.076
+Loss: = 0.083
+Loss: = 0.078
+Loss: = 0.088
+Loss: = 0.081
+Loss: = 0.085
+Loss: = 0.081
+Loss: = 0.080
+Loss: = 0.090
+Loss: = 0.089
+Loss: = 0.079
+Loss: = 0.088
+Loss: = 0.083
+Loss: = 0.086
+Loss: = 0.093
+Loss: = 0.083
+Loss: = 0.091
+Loss: = 0.085
+Loss: = 0.081
+Loss: = 0.087
+Loss: = 0.084
+Loss: = 0.091
+Loss: = 0.084
+Loss: = 0.084
+Loss: = 0.086
+Loss: = 0.084
+Loss: = 0.082
+Loss: = 0.094
+Loss: = 0.079
+Average epoch loss: = 0.085
+````
+
+The results obtained labels at least 80% of the road pixels correctly, and labels no more than 20% of the non-road pixels as road.
+
+The images bellow shows the performance of the FCN on the ten first images of the test-set.
+
+![](./result_images/um_000000.png)
+
+![](./result_images/um_000001.png)
+
+![](./result_images/um_000002.png)
+
+![](./result_images/um_000003.png)
+
+![](./result_images/um_000004.png)
+
+![](./result_images/um_000005.png)
+
+![](./result_images/um_000006.png)
+
+![](./result_images/um_000007.png)
+
+![](./result_images/um_000008.png)
+
+![](./result_images/um_000009.png)
+
+![](./result_images/um_000010.png)
+
+
+
+
 
 ### Setup
 ##### Frameworks and Packages
